@@ -4286,6 +4286,98 @@ describe('model: populate:', function() {
         });
       });
 
+      it('match prevents using $where (nested $where)', async function () {
+        const ParentSchema = new Schema({
+          name: String,
+          child: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Child'
+          },
+          children: [{
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Child'
+          }]
+        });
+
+        const ChildSchema = new Schema({
+          name: String
+        });
+        ChildSchema.virtual('parent', {
+          ref: 'Parent',
+          localField: '_id',
+          foreignField: 'parent'
+        });
+
+        const Parent = db.model('Parent', ParentSchema);
+        const Child = db.model('Child', ChildSchema);
+
+        const child = await Child.create({ name: 'Luke' });
+        const parent = await Parent.create({ name: 'Anakin', child: child._id });
+
+        // Top-level $where
+        await assert.rejects(
+          async () => {
+            const doc = await Parent.findOne();
+            return doc.populate({ path: 'child', match: { $where: 'console.log("oops!");' } }).execPopulate();
+          },
+          /Cannot use \$where filter with populate\(\) match/
+        );
+
+        // Nested $where
+        await assert.rejects(
+          async () => {
+            const doc = await Parent.findOne();
+            return doc.populate({ path: 'child', match: { foo: { $where: 'console.log("oops!");' } } }).execPopulate();
+          },
+          /Cannot use \$where filter with populate\(\) match/
+        );
+
+        // Array containing $where
+        await assert.rejects(
+          async () => {
+            const doc = await Parent.findOne();
+            return doc.populate({ path: 'child', match: [{ $where: 'console.log("oops!");' }] }).execPopulate();
+          },
+          /Cannot use \$where filter with populate\(\) match/
+        );
+
+        // Deeply nested $where
+        await assert.rejects(
+          async () => {
+            const doc = await Parent.findOne();
+            return doc.populate({ path: 'child', match: { foo: { bar: { $where: 'console.log("oops!");' } } } }).execPopulate();
+          },
+          /Cannot use \$where filter with populate\(\) match/
+        );
+
+        // Existing case 1
+        await assert.rejects(
+          async () => {
+            const docs = await Parent.find();
+            return docs[0].populate({ path: 'child', match: { $where: 'console.log("oops!");' } }).execPopulate();
+          },
+          /Cannot use \$where filter with populate\(\) match/
+        );
+
+        // Existing case 2
+        await assert.rejects(
+          async () => {
+            return parent.populate({ path: 'child', match: { $where: 'console.log("oops!");' } }).execPopulate();
+          },
+          /Cannot use \$where filter with populate\(\) match/
+        );
+
+        // Existing case 3
+        await assert.rejects(
+          async () => {
+            const docs = await Child.find();
+            return docs[0].populate({ path: 'parent', match: { $where: 'console.log("oops!");' } }).execPopulate();
+          },
+          /Cannot use \$where filter with populate\(\) match/
+        );
+      });
+
+
       it('multiple source docs', function(done) {
         const PersonSchema = new Schema({
           name: String,
